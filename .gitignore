@@ -1,0 +1,22 @@
+# Rust
+target/
+Cargo.lock
+
+# Binaries
+engine-rag
+bin/
+
+# Test artifacts
+.projects/
+storage/
+target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
