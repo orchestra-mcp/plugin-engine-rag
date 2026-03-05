@@ -1,0 +1,335 @@
+syntax = "proto3";
+package orchestra.plugin.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// ================================================================
+// Orchestra Plugin Protocol
+//
+// This is NOT a gRPC service. Messages are sent over QUIC streams
+// using length-delimited Protobuf framing:
+//   [4 bytes: big-endian uint32 length][N bytes: Protobuf message]
+//
+// Each RPC = one bidirectional QUIC stream:
+//   Client opens stream → writes PluginRequest → reads PluginResponse → close
+// ================================================================
+
+// ---- Request/Response Envelope ----
+
+message PluginRequest {
+  string request_id = 1; // UUIDv7
+  oneof request {
+    // Lifecycle
+    PluginManifest register = 10;
+    BootRequest boot = 11;
+    ShutdownRequest shutdown = 12;
+    HealthRequest health = 13;
+    // Tools
+    ToolRequest tool_call = 20;
+    ListToolsRequest list_tools = 21;
+    // Prompts
+    ListPromptsRequest list_prompts = 22;
+    PromptGetRequest prompt_get = 23;
+    // Storage
+    StorageReadRequest storage_read = 30;
+    StorageWriteRequest storage_write = 31;
+    StorageDeleteRequest storage_delete = 32;
+    StorageListRequest storage_list = 33;
+    // Streaming
+    StreamStart stream_start = 40;
+    StreamCancel stream_cancel = 41;
+    // Events
+    Subscribe subscribe = 50;
+    Unsubscribe unsubscribe = 51;
+    Publish publish = 52;
+  }
+}
+
+message PluginResponse {
+  string request_id = 1;
+  oneof response {
+    // Lifecycle
+    RegistrationResult register = 10;
+    BootResult boot = 11;
+    ShutdownResult shutdown = 12;
+    HealthResult health = 13;
+    // Tools
+    ToolResponse tool_call = 20;
+    ListToolsResponse list_tools = 21;
+    // Prompts
+    ListPromptsResponse list_prompts = 22;
+    PromptGetResponse prompt_get = 23;
+    // Storage
+    StorageReadResponse storage_read = 30;
+    StorageWriteResponse storage_write = 31;
+    StorageDeleteResponse storage_delete = 32;
+    StorageListResponse storage_list = 33;
+    // Streaming
+    StreamChunk stream_chunk = 40;
+    StreamEnd stream_end = 41;
+    // Events
+    EventDelivery event_delivery = 50;
+  }
+}
+
+// ================================================================
+// Lifecycle
+// ================================================================
+
+message PluginManifest {
+  string id = 1;                          // "tools.features", "storage.markdown"
+  string version = 2;                     // semver
+  string language = 3;                    // "go", "rust", "swift", etc.
+  // What this plugin provides
+  repeated string provides_tools = 4;
+  repeated string provides_events = 5;
+  repeated string provides_storage = 6;   // ["markdown", "sqlite", "postgres"]
+  repeated string provides_transport = 7; // ["stdio", "webtransport"]
+  repeated string provides_ai = 8;        // ["claude", "openai"]
+  // What this plugin needs from other plugins (via orchestrator)
+  repeated string needs_storage = 9;
+  repeated string needs_events = 10;
+  repeated string needs_ai = 11;
+  repeated string needs_tools = 12;
+  // Metadata
+  string description = 13;
+  string author = 14;
+  string binary = 15;
+  repeated string args = 16;
+  map<string, string> env = 17;
+  repeated string provides_prompts = 18;
+}
+
+message RegistrationResult {
+  bool accepted = 1;
+  string reject_reason = 2;
+}
+
+message BootRequest {
+  map<string, string> config = 1;
+}
+
+message BootResult {
+  bool ready = 1;
+  string error = 2;
+}
+
+message ShutdownRequest {
+  int32 timeout_seconds = 1;
+}
+
+message ShutdownResult {
+  bool clean = 1;
+}
+
+message HealthRequest {}
+
+message HealthResult {
+  Status status = 1;
+  string message = 2;
+  map<string, string> details = 3;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_HEALTHY = 1;
+    STATUS_DEGRADED = 2;
+    STATUS_UNHEALTHY = 3;
+  }
+}
+
+// ================================================================
+// Tools
+// ================================================================
+
+message ToolRequest {
+  string tool_name = 1;
+  google.protobuf.Struct arguments = 2;
+  string caller_plugin = 3;
+  string trace_parent = 4;
+  string provider = 5;           // AI provider for routing (e.g., "claude", "openai", "gemini", "ollama")
+}
+
+message ToolResponse {
+  bool success = 1;
+  google.protobuf.Struct result = 2;
+  string error_code = 3;
+  string error_message = 4;
+}
+
+message ListToolsRequest {}
+
+message ListToolsResponse {
+  repeated ToolDefinition tools = 1;
+}
+
+message ToolDefinition {
+  string name = 1;
+  string description = 2;
+  google.protobuf.Struct input_schema = 3; // JSON Schema as Struct
+}
+
+// ================================================================
+// Prompts
+// ================================================================
+
+message PromptGetRequest {
+  string prompt_name = 1;
+  map<string, string> arguments = 2;
+}
+
+message PromptGetResponse {
+  string description = 1;
+  repeated PromptMessage messages = 2;
+}
+
+message ListPromptsRequest {}
+
+message ListPromptsResponse {
+  repeated PromptDefinition prompts = 1;
+}
+
+message PromptDefinition {
+  string name = 1;
+  string description = 2;
+  repeated PromptArgument arguments = 3;
+}
+
+message PromptArgument {
+  string name = 1;
+  string description = 2;
+  bool required = 3;
+}
+
+message PromptMessage {
+  string role = 1;    // "user", "assistant"
+  ContentBlock content = 2;
+}
+
+message ContentBlock {
+  string type = 1;    // "text", "resource"
+  string text = 2;    // for type="text"
+}
+
+// ================================================================
+// Storage
+// ================================================================
+
+message StorageReadRequest {
+  string path = 1;           // "projects/my-app/features/FEAT-001.md"
+  string storage_type = 2;   // "markdown" (default), "sqlite", "postgres"
+}
+
+message StorageReadResponse {
+  bytes content = 1;                      // Markdown body
+  google.protobuf.Struct metadata = 2;   // Structured fields (status, priority, etc.)
+  int64 version = 3;
+}
+
+message StorageWriteRequest {
+  string path = 1;
+  bytes content = 2;                      // Markdown body
+  google.protobuf.Struct metadata = 3;   // Structured fields
+  int64 expected_version = 4;            // 0 = create, >0 = CAS update
+  string storage_type = 5;
+}
+
+message StorageWriteResponse {
+  bool success = 1;
+  int64 new_version = 2;
+  string error = 3;
+}
+
+message StorageDeleteRequest {
+  string path = 1;
+  string storage_type = 2;
+}
+
+message StorageDeleteResponse {
+  bool success = 1;
+}
+
+message StorageListRequest {
+  string prefix = 1;       // "projects/my-app/features/"
+  string pattern = 2;      // "*.md"
+  string storage_type = 3;
+}
+
+message StorageListResponse {
+  repeated StorageEntry entries = 1;
+}
+
+message StorageEntry {
+  string path = 1;
+  int64 size = 2;
+  int64 version = 3;
+  google.protobuf.Timestamp modified_at = 4;
+}
+
+// ================================================================
+// Streaming
+//
+// Streaming tools keep the QUIC stream open for multiple responses.
+// Flow: Client sends StreamStart → Server sends N StreamChunks → StreamEnd
+// Client can send StreamCancel at any point to abort.
+// ================================================================
+
+message StreamStart {
+  string stream_id = 1;                    // UUIDv7 — correlates all chunks
+  string tool_name = 2;                    // Tool to invoke in streaming mode
+  google.protobuf.Struct arguments = 3;    // Tool arguments
+  string caller_plugin = 4;               // Source plugin ID
+}
+
+message StreamCancel {
+  string stream_id = 1;
+}
+
+message StreamChunk {
+  string stream_id = 1;
+  bytes data = 2;                          // Chunk payload (text, JSON, binary)
+  string content_type = 3;                 // "text/plain", "application/json", etc.
+  int64 sequence = 4;                      // 0-based chunk index
+}
+
+message StreamEnd {
+  string stream_id = 1;
+  bool success = 2;
+  string error_code = 3;
+  string error_message = 4;
+  int64 total_chunks = 5;                  // Total chunks sent
+}
+
+// ================================================================
+// Events (Pub/Sub)
+//
+// Plugins can subscribe to event topics and publish events.
+// The orchestrator routes events from publishers to subscribers
+// using fan-out (one publish → N deliveries).
+// ================================================================
+
+message Subscribe {
+  string subscription_id = 1;             // UUIDv7 — unique per subscription
+  string topic = 2;                        // "feature.updated", "build.completed", etc.
+  map<string, string> filters = 3;         // Optional key=value filters on payload
+}
+
+message Unsubscribe {
+  string subscription_id = 1;
+}
+
+message Publish {
+  string topic = 1;                        // Event topic
+  string event_type = 2;                   // Specific event type within topic
+  google.protobuf.Struct payload = 3;      // Event data
+  string source_plugin = 4;               // Publisher plugin ID
+}
+
+message EventDelivery {
+  string subscription_id = 1;             // Which subscription matched
+  string topic = 2;
+  string event_type = 3;
+  google.protobuf.Struct payload = 4;
+  string source_plugin = 5;               // Who published
+  google.protobuf.Timestamp timestamp = 6;
+}
