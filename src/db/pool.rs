@@ -65,6 +65,22 @@ impl DbPool {
         })
     }
 
+    /// Opens an existing SQLite database in read-only mode.
+    ///
+    /// Use this to attach to an externally managed database (e.g. the Orchestra
+    /// storage plugin's workspace DB) without risking writes or schema changes.
+    /// The file must already exist; no parent directory creation is performed.
+    pub fn open_readonly(path: PathBuf) -> DbResult<Self> {
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let connection = Connection::open_with_flags(&path, flags)?;
+        // Foreign keys and busy timeout only — no WAL pragma (read-only cannot change it).
+        connection.execute("PRAGMA foreign_keys = ON", [])?;
+        connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        Ok(Self {
+            connection: Arc::new(Mutex::new(connection)),
+        })
+    }
+
     /// Creates an in-memory database pool (useful for testing).
     ///
     /// Enables foreign keys but skips WAL mode (not applicable for in-memory).

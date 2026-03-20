@@ -87,6 +87,7 @@ fn build_manifest() -> ManifestJson {
             "get_index_stats".to_string(),
             "search_symbols".to_string(),
             "index_directory".to_string(),
+            "index_workspace_data".to_string(),
             "save_memory".to_string(),
             "search_memory".to_string(),
             "get_context".to_string(),

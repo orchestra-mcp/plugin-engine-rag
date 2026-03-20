@@ -12,6 +12,7 @@ pub mod lsp;
 pub mod memory;
 pub mod parse;
 pub mod search;
+pub mod workspace_data;
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -148,7 +149,8 @@ pub fn register_all_tools_with_lsp(
             .expect("failed to create IndexManager for search tools");
         let shared = Arc::new(tokio::sync::RwLock::new(manager));
         search::register_with_manager(registry, Arc::clone(&shared));
-        directory::register(registry, shared);
+        directory::register(registry, Arc::clone(&shared));
+        workspace_data::register(registry, shared);
     }
     if let Some(pool) = memory_pool {
         memory::register(registry, pool);
